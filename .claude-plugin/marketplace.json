@@ -1,0 +1,14 @@
+{
+  "name": "session-map",
+  "description": "session-map, a Claude Code mod: a live timeline of the session and a clickable list of open items and decisions",
+  "owner": {
+    "name": "peacemakerxx99"
+  },
+  "plugins": [
+    {
+      "name": "session-map",
+      "source": "./session-map",
+      "description": "A live timeline of the session's issues and a clickable list of open items and decisions"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "name": "session-map",
+  "version": "0.2.1",
+  "description": "A live timeline of the session's issues and a clickable list of open items and decisions",
+  "icon": "./.claude-plugin/icon.png",
+  "types": "./types/index.d.ts",
+  "author": {
+    "name": "peacemakerxx99"
+  },
+  "license": "MIT"
+}
