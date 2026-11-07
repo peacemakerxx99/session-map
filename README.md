@@ -8,11 +8,11 @@ A Claude Code mod that keeps you oriented in long sessions. One pane beside the 
 
 ## What it shows
 
-- **Decisions & to-dos, at the top.** Decisions waiting on you, each with one button per option plus a **Discuss** button. Unfinished work, with **Start**, **Done** and **Drop** buttons. Clicking a button sends your choice straight to Claude as a message. **⟳ Refresh** checks the conversation for decisions you already settled in the chat.
+- **Decisions & to-dos, at the top.** Decisions waiting on you, each with one button per option plus a **Discuss** button. Unfinished work, with **Start**, **Done** and **Drop** buttons. Clicking a button sends your choice straight to Claude as a message.
 - **The timeline, in the middle.** The active issues, then a history of the session, newest at the top. Each issue has its own colour, and an issue that branched off another is indented under it. Closed issues fade to grey. A legend line explains the colours.
 - **Completed, at the bottom.** Each finished issue with its whole story.
 
-Claude fills the pane in as it works, using three tools the mod adds (`timeline`, `open_items`, `session_map`) and a short instruction added to its system prompt. Every 10 turns, every 15 minutes while the chat is moving, and when you press Refresh, a cheap background check reads back over the conversation and adds anything Claude forgot to log. Those entries are marked ⟲. If Claude does work without logging it, the mod reminds it on the next turn.
+Claude fills the pane in as it works, using three tools the mod adds (`timeline`, `open_items`, `session_map`) and a short instruction added to its system prompt. Every 10 turns, every 15 minutes while the chat is moving, and when you press Refresh, a cheap background check reads back over the conversation and adds anything Claude forgot to log. Those entries are marked ⟲. If Claude does work without logging it, the mod reminds it, during a long turn as well as on the next one.
 
 Each session's map is saved, so `--resume` brings it back. When you start a new session in the same folder, the mod offers to bring in the open items from the last one, and asks Claude to check each one against the actual state of the work. Times are shown in your local time.
 
@@ -22,7 +22,7 @@ Each session's map is saved, so `--resume` brings it back. When you start a new 
 | `/session-map-check` | Run the background catch-up check now |
 | `/session-map-about` | Why the mod exists, what it does and how it works (also shown once, the first time it runs) |
 
-The mod opens a single pane, so there is no tab row. The pane scrolls: ctrl+x gives it the keyboard, then use ↑↓ or the mouse wheel. The pane docks beside the chat when the terminal is wide enough (roughly 110 to 144 columns).
+The mod opens a single pane, so there is no tab row. **⟳ Refresh map**, at the top, runs the catch-up check now. The pane scrolls: ctrl+x gives it the keyboard, then use ↑↓ or the mouse wheel. The pane docks beside the chat when the terminal is wide enough (roughly 110 to 144 columns).
 
 ## Install
 

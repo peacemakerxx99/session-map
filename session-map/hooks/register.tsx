@@ -16,6 +16,8 @@ import {
   depthOf,
   digest,
   nudgeText,
+  midTurnNudgeText,
+  MID_TURN_NUDGE_AFTER_CALLS,
   shouldNudge,
   resolveItem,
   sweepPrompt,
@@ -115,6 +117,8 @@ let isWorking = false
 let isLogged = false
 let unloggedTurns = 0
 let pendingNudge = ''
+// Work calls in the current turn since the timeline was last written.
+let unloggedCalls = 0
 
 // Every write goes through here: the session's state, then the store, so
 // a --resume brings the map back.
@@ -307,10 +311,16 @@ export const register: Register = on => {
   })
 
   // Watches every other tool the main loop runs, to tell working turns apart.
-  // Observe only: it always passes the call on.
+  // It always passes the call on; after a run of unlogged work inside one turn
+  // it adds a reminder the model reads after the tool's result.
   on('tool.call', async ($, e, next) => {
-    if (!e.agentId && !e.tool.startsWith('mcp__session-map__') && !NOT_WORK.has(e.tool)) isWorking = true
-    return next(e)
+    if (e.agentId || e.tool.startsWith('mcp__session-map__') || NOT_WORK.has(e.tool)) return next(e)
+    isWorking = true
+    unloggedCalls += 1
+    const r = await next(e)
+    if (unloggedCalls < MID_TURN_NUDGE_AFTER_CALLS || r.deny !== undefined) return r
+    unloggedCalls = 0
+    return { ...r, context: [...(r.context ?? []), midTurnNudgeText(await read($, mapAtom))] }
   })
 
   // A reminder the turn after unlogged work, riding beside the next prompt.
@@ -322,7 +332,10 @@ export const register: Register = on => {
   })
 
   on('tool.call', { tool: TOOL_TIMELINE }, async ($, e) => {
-    if (!e.agentId) isLogged = true
+    if (!e.agentId) {
+      isLogged = true
+      unloggedCalls = 0
+    }
     const now = await $.clock.now()
     let out: { message: string; isError?: boolean } = { message: '' }
     await mutate($, m => {
@@ -333,8 +346,9 @@ export const register: Register = on => {
     return out.isError ? { deny: out.message } : { result: out.message }
   })
 
+  // Not logging: an item change leaves the timeline as it was, so it never
+  // silences the reminders.
   on('tool.call', { tool: TOOL_ITEMS }, async ($, e) => {
-    if (!e.agentId) isLogged = true
     const now = await $.clock.now()
     let out: { message: string; isError?: boolean } = { message: '' }
     await mutate($, m => {
@@ -394,6 +408,7 @@ export const register: Register = on => {
       pendingNudge = isWorking && !isLogged && shouldNudge(map, unloggedTurns) ? nudgeText(map) : ''
       isWorking = false
       isLogged = false
+      unloggedCalls = 0
     }
     if (!e.agentId && !e.isAborted) {
       turns += 1
@@ -407,12 +422,19 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: COMBINED }, async ($, e) => {
-    const { Box, Text } = $.ui.resolve(e)
+    const { Box, Text, Button } = $.ui.resolve(e)
     const items = await itemsBody($, e as PaneInput)
     const timeline = await timelineBody($, e as PaneInput)
     const completed = await completedBody($, e as PaneInput)
     return (
       <Box flexDirection="column">
+        {/* For the whole map: the check catches up decisions, to-dos and the timeline. */}
+        <Box flexDirection="row" flexWrap="wrap" key="refresh-row">
+          <Button key="refresh" onPress={() => refresh($)}>
+            <Text color="text">⟳ Refresh map</Text>
+          </Button>
+          <Text dimColor> ctrl+x, then ↑↓ to scroll</Text>
+        </Box>
         <Box borderStyle="round" borderColor="warning" paddingX={1} key="hdr-items">
           <Text bold color="warning">{ITEMS_TITLE.toUpperCase()}</Text>
         </Box>
@@ -565,12 +587,6 @@ async function itemsBody($: EngineInterface, e: PaneInput) {
 
   return (
     <Box flexDirection="column">
-      <Box flexDirection="row" flexWrap="wrap" key="refresh-row">
-        <Button key="refresh" onPress={() => refresh($)}>
-          <Text color="text">⟳ Refresh</Text>
-        </Button>
-        <Text dimColor> ctrl+x, then ↑↓ to scroll</Text>
-      </Box>
       {offer && (
         <Box flexDirection="column" marginBottom={1} key="carry">
           <Text bold color="claude">

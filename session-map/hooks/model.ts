@@ -325,6 +325,14 @@ export const nudgeText = (map: SessionMap) =>
     ? 'Session map reminder: the last few turns used tools but logged nothing to the timeline. If that work reached a key moment (a step, a decision, an achievement) or finished an issue, log it now with mcp__session-map__timeline before answering. If it started a different problem, open a new issue for it.'
     : 'Session map reminder: the last turn used tools but no issue is open on the timeline, so that work is missing from it. Before answering, call mcp__session-map__timeline with action "open" for the work under way (and close it if it is already finished).'
 
+/** Work calls in one turn with nothing logged before a reminder rides on a tool result. */
+export const MID_TURN_NUDGE_AFTER_CALLS = 8
+
+export const midTurnNudgeText = (map: SessionMap) =>
+  map.issues.some(i => i.status === 'active')
+    ? `Session map reminder: ${MID_TURN_NUDGE_AFTER_CALLS} tool calls in this turn and nothing logged to the timeline. If this work reached a key moment or finished an issue, log it with mcp__session-map__timeline now; if it is a different problem from the active issue, open a new issue for it.`
+    : `Session map reminder: ${MID_TURN_NUDGE_AFTER_CALLS} tool calls in this turn and no issue is open on the timeline. Call mcp__session-map__timeline with action "open" for the work under way now, then carry on.`
+
 /** The message sent after carried items arrive: check them before trusting them. */
 export const carriedCheckPrompt = (items: OpenItem[]) =>
   [

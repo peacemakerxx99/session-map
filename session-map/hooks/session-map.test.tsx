@@ -354,3 +354,46 @@ test('the 15-minute check runs only when turns happened since the last one', asy
   await clock.advance(15 * 60 * 1000)
   expect(forks).toBe(1)
 })
+
+test('a long unlogged run inside one turn gets a reminder on a tool result; a to-do change does not silence it', async ($, on) => {
+  engine(on, [])
+  on('tool.call', { tool: 'Bash' }, () => ({ result: 'ok' }))
+  await start($)
+  const bash = () => $.tool.call({ tool: 'Bash', command: 'ls' } as any)
+  await $.tool.call({ tool: 'mcp__session-map__open_items', action: 'add', kind: 'todo', text: 'Ship it' } as any)
+
+  const results: any[] = []
+  for (let n = 0; n < 8; n++) {
+    if (n === 4) await $.tool.call({ tool: 'mcp__session-map__open_items', action: 'resolve', id: 'T1' } as any)
+    results.push(await bash())
+  }
+  for (const r of results.slice(0, 7)) expect(r.context ?? []).toEqual([])
+  expect(String(results[7].context)).toMatch(/8 tool calls in this turn and no issue is open/)
+
+  // Logging resets the count: the next seven calls stay quiet.
+  await $.tool.call({ tool: 'mcp__session-map__timeline', action: 'open', title: 'Ship' } as any)
+  for (let n = 0; n < 7; n++) expect((await bash()).context ?? []).toEqual([])
+  expect(String((await bash()).context)).toMatch(/nothing logged to the timeline/)
+})
+
+test('Refresh map sits at the top of the pane', async ($, on) => {
+  engine(on, [])
+  await start($)
+  const ui = await $.ui.mount({ ...pane('session-map'), surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /⟳ Refresh map/ })).toBeDefined()
+  expect(await ui.find({ key: 'refresh' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a turn that only changed a to-do still earns the between-turn reminder', async ($, on) => {
+  const contexts: (readonly string[] | undefined)[] = []
+  engine(on, [], [], {}, contexts)
+  on('tool.call', { tool: 'Bash' }, () => ({ result: 'ok' }))
+  on('turn.complete', () => ({ text: 'done' }))
+  await start($)
+  await $.tool.call({ tool: 'Bash', command: 'ls' } as any)
+  await $.tool.call({ tool: 'mcp__session-map__open_items', action: 'add', kind: 'todo', text: 'Ship it' } as any)
+  await $.turn.complete({ reason: 'answer', answer: 'done' } as any)
+  await $.prompt.submit({ text: 'next' } as any)
+  expect(String(contexts.at(-1))).toMatch(/no issue is open/)
+})
