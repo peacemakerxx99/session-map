@@ -23,10 +23,15 @@ import {
 } from './model'
 import type { ItemArgs, TimelineArgs } from './model'
 
-const TIMELINE = 'timeline'
-const ITEMS = 'open-items'
 const COMBINED = 'session-map'
+// Panes earlier versions opened beside the map; closed at start so only the
+// map shows and the engine draws no tab row.
+const RETIRED = ['timeline', 'open-items', 'session-map-completed']
 const WELCOME = 'session-map-welcome'
+// The top section's name: it holds decisions and unfinished work.
+const ITEMS_TITLE = 'Decisions & to-dos'
+// The timed catch-up check: every 15 minutes, only when turns ran since the last one.
+const AUTO_CHECK_MS = 15 * 60 * 1000
 // Bump to show the welcome again to everyone after its text changes.
 const WELCOME_VERSION = 'welcome-2'
 const SWEEP_EVERY_TURNS = 10
@@ -51,6 +56,7 @@ const panes = atom({ plugin: 'session-map', key: 'panes' } as const, {
   timeline: false,
   items: false,
   combined: false,
+  completed: false,
 })
 
 const TOOL_TIMELINE = 'mcp__session-map__timeline'
@@ -63,6 +69,7 @@ The user keeps a live timeline and an open-items list of this session in side pa
 - Log only key moments on that issue: a notable step, a decision taken, an achievement ("step" / "decision" / "achievement"). One short line each; skip trivia.
 - When an issue is finished, call it with action "close".
 - When something needs the user's decision, call ${TOOL_ITEMS} with action "add", kind "decision", and 2-4 short options they can click. Unfinished work that must not be forgotten: kind "todo". Resolve items when they are done.
+- When the user answers an open decision in the chat instead of clicking its button, resolve it at once with ${TOOL_ITEMS} (action "resolve", text = the answer), and resolve any to-do the chat shows is done or dropped.
 - The user's button clicks arrive as messages from the session-map plugin; act on them.
 - Before "close session" or any wrap-up, call ${TOOL_READ} and surface everything still open.`
 
@@ -73,20 +80,21 @@ const JUST_INSTALLED =
   'Just installed? Start a new session. This one has the panes but not the instructions that tell Claude to log, so its timeline may stay empty.'
 
 const WHAT = [
-  '• Open items, on top: decisions waiting on you, each with buttons. Click an option and Claude receives your answer as a message — no typing. Unfinished work has Start (Claude begins it), Done and Drop buttons.',
-  '• Timeline, below: every issue of the session in its own colour, newest at the top. A side quest is indented under the issue it branched off from; finished issues fade to grey.',
+  '• Decisions & to-dos, on top: decisions waiting on you, each with buttons. Click an option and Claude receives your answer as a message — no typing. Unfinished work has Start (Claude begins it), Done and Drop buttons. Refresh checks the conversation for anything already settled.',
+  '• Timeline, below: the active issues, then every moment of the session, newest at the top. A side quest is indented under the issue it branched off from; finished issues fade to grey.',
+  '• Completed, at the bottom: each finished issue with its whole story.',
+  '• The pane scrolls: ctrl+x gives it the keyboard, then ↑↓ or the mouse wheel.',
 ]
 
 const HOW = [
   '• Claude logs the key moments itself (an issue starts, a decision, an achievement, an issue closes) with three tools this mod adds, guided by a short instruction added to its system prompt.',
-  '• Every 10 turns a quick background check rereads the conversation and adds anything Claude missed (marked ⟲). It runs on your own Claude session, so it uses a little of your usage.',
+  '• A quick background check rereads the conversation and adds anything Claude missed (marked ⟲): every 10 turns, every 15 minutes while the chat is moving, and when you press Refresh. It runs on your own Claude session, so it uses a little of your usage.',
   '• Before wrapping up a session, Claude reads the list, so nothing open is left behind.',
   "• Each session's map is saved on this computer only; resuming a session brings it back.",
 ]
 
 const COMMANDS = [
   '/session-map — show or hide the pane',
-  '/timeline, /open-items — one view on its own',
   '/session-map-check — run the catch-up check now',
   '/session-map-about — this page again',
 ]
@@ -98,6 +106,7 @@ const colorOf = (map: SessionMap, issueId: string) => {
 
 let sid = ''
 let turns = 0
+let turnsAtLastSweep = 0
 let isSweeping = false
 let cwd = ''
 // Nudge bookkeeping for the main loop: did this turn work, did it log, and how
@@ -120,6 +129,7 @@ async function mutate($: EngineInterface, fn: (m: SessionMap) => SessionMap) {
 async function sweep($: EngineInterface): Promise<string> {
   if (isSweeping) return 'a check is already running'
   isSweeping = true
+  turnsAtLastSweep = turns
   try {
     const map = await read($, mapAtom)
     const reply = await $.model.fork({ prompt: sweepPrompt(map) })
@@ -141,30 +151,36 @@ async function sweep($: EngineInterface): Promise<string> {
   }
 }
 
-const PANES = {
-  timeline: { id: TIMELINE, title: 'Timeline' },
-  items: { id: ITEMS, title: 'Open items & decisions' },
-  combined: { id: COMBINED, title: 'Session map' },
-} as const
+// The Refresh button: the check outlasts a press's 10 s budget, so it is fired,
+// not awaited, and says how it went in a toast.
+function refresh($: EngineInterface) {
+  $.ui.toast('Session map: checking the conversation…')
+  void sweep($)
+    .then(msg => $.ui.toast(`Session map: ${msg}`))
+    .catch(() => $.ui.toast('Session map: the check failed'))
+}
 
-async function toggle($: EngineInterface, which: keyof typeof PANES): Promise<string> {
+// The timed check: skipped while nothing happened since the last one.
+function autoCheck($: EngineInterface) {
+  if (turns > turnsAtLastSweep) void sweep($).catch(() => {})
+}
+
+const MAP_PANE = { id: COMBINED, title: 'Session map' } as const
+
+async function toggle($: EngineInterface): Promise<string> {
   const flags = await read($, panes)
-  const isOpen = !flags[which]
-  const { id, title } = PANES[which]
-  if (isOpen) await $.ui.open({ id, title })
-  else await $.ui.close({ id })
-  await update($, panes, f => ({ ...(f ?? flags), [which]: isOpen }))
+  const isOpen = !flags.combined
+  if (isOpen) await $.ui.open(MAP_PANE)
+  else await $.ui.close({ id: COMBINED })
+  await update($, panes, f => ({ ...(f ?? flags), combined: isOpen }))
   return isOpen ? 'shown' : 'hidden'
 }
 
-
-// The default layout: all three views as tabs, the combined one opened last
-// so it is the one in front.
+// The one pane, for everyone: with a single pane open the engine draws no tabs.
 async function openDefaultTabs($: EngineInterface) {
-  for (const which of ['items', 'timeline', 'combined'] as const) {
-    const r = await $.ui.open(PANES[which])
-    if (r?.isPlaced) await update($, panes, f => ({ ...f, [which]: true }))
-  }
+  for (const id of RETIRED) await $.ui.close({ id }).catch(() => {})
+  const r = await $.ui.open(MAP_PANE)
+  if (r?.isPlaced) await update($, panes, f => ({ ...f, combined: true }))
 }
 
 async function acceptCarry($: EngineInterface) {
@@ -226,8 +242,7 @@ export const register: Register = on => {
     if (cwd) await offerCarry($)
 
     await $.command.register({ name: 'session-map', description: 'Show or hide the combined pane: open items on top, timeline below' })
-    await $.command.register({ name: 'timeline', description: 'Show or hide the session timeline pane' })
-    await $.command.register({ name: 'open-items', description: 'Show or hide the open items and decisions pane' })
+    $.clock.every(AUTO_CHECK_MS, () => autoCheck($))
     await $.command.register({ name: 'session-map-check', description: 'Ask Claude now to catch the session map up on anything missed' })
 
     await $.tool.register({
@@ -367,9 +382,7 @@ export const register: Register = on => {
     )
   })
 
-  on('command.run', { command: 'session-map' }, async $ => ({ text: `Session map ${await toggle($, 'combined')}.` }))
-  on('command.run', { command: 'timeline' }, async $ => ({ text: `Timeline ${await toggle($, 'timeline')}.` }))
-  on('command.run', { command: 'open-items' }, async $ => ({ text: `Open items ${await toggle($, 'items')}.` }))
+  on('command.run', { command: 'session-map' }, async $ => ({ text: `Session map ${await toggle($)}.` }))
   on('command.run', { command: 'session-map-check' }, async $ => ({ text: `Session map: ${await sweep($)}.` }))
 
   on('turn.complete', async ($, e, next) => {
@@ -393,22 +406,25 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('ui.render', { component: 'Pane', requestId: TIMELINE }, ($, e) => timelineBody($, e as PaneInput))
-  on('ui.render', { component: 'Pane', requestId: ITEMS }, ($, e) => itemsBody($, e as PaneInput))
   on('ui.render', { component: 'Pane', requestId: COMBINED }, async ($, e) => {
     const { Box, Text } = $.ui.resolve(e)
     const items = await itemsBody($, e as PaneInput)
     const timeline = await timelineBody($, e as PaneInput)
+    const completed = await completedBody($, e as PaneInput)
     return (
       <Box flexDirection="column">
         <Box borderStyle="round" borderColor="warning" paddingX={1} key="hdr-items">
-          <Text bold color="warning">OPEN ITEMS & DECISIONS</Text>
+          <Text bold color="warning">{ITEMS_TITLE.toUpperCase()}</Text>
         </Box>
         {items}
         <Box borderStyle="round" borderColor="suggestion" paddingX={1} marginTop={1} key="hdr-timeline">
           <Text bold color="suggestion">TIMELINE</Text>
         </Box>
         {timeline}
+        <Box borderStyle="round" borderColor="success" paddingX={1} marginTop={1} key="hdr-completed">
+          <Text bold color="success">COMPLETED</Text>
+        </Box>
+        {completed}
       </Box>
     )
   })
@@ -441,12 +457,9 @@ async function timelineBody($: EngineInterface, e: PaneInput) {
           {'  '.repeat(depthOf(map, i.id))}● {i.id} {cut(i.title, width - 6 - 2 * depthOf(map, i.id))}
         </Text>
       ))}
-      {done.length > 0 && <Text bold color="inactive">Completed ({done.length})</Text>}
-      {done.map(i => (
-        <Text color="inactive">
-          {'  '.repeat(depthOf(map, i.id))}✓ {i.id} {cut(i.title, width - 6 - 2 * depthOf(map, i.id))}
-        </Text>
-      ))}
+      {done.length > 0 && (
+        <Text color="inactive">Completed ({done.length}): {done.map(i => i.id).join(', ')} — full story under Completed, below</Text>
+      )}
       <Text color="text">
         Legend: <Text color={PALETTE[0]}>colour</Text> = active · <Text color="inactive">grey</Text> = completed · ⟲ = added by the catch-up check · ↩ = carried from last session
       </Text>
@@ -470,6 +483,45 @@ async function timelineBody($: EngineInterface, e: PaneInput) {
           </Text>
         )
       })}
+    </Box>
+  )
+}
+
+// ---- Completed pane -------------------------------------------------------
+// Each finished issue, latest finished first, with its moments in order.
+async function completedBody($: EngineInterface, e: PaneInput) {
+  const { Box, Text } = $.ui.resolve(e)
+  const map = await read($, mapAtom)
+  const width = Math.max(20, e.props.bodyColumns ?? 40)
+  const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, Math.max(1, n - 1))}…` : s)
+  const done = map.issues
+    .filter(i => i.status === 'closed')
+    .sort((a, b) => (b.closedAt ?? 0) - (a.closedAt ?? 0))
+
+  if (done.length === 0) return <Text dimColor>No completed issues yet.</Text>
+
+  return (
+    <Box flexDirection="column">
+      {done.map(i => (
+        <Box flexDirection="column" marginTop={1} key={`done-${i.id}`}>
+          <Text bold color="success">
+            ✓ {i.id} {i.title}
+            {i.parentId ? ` (off ${i.parentId})` : ''}
+          </Text>
+          {map.events
+            .filter(ev => ev.issueId === i.id && ev.kind !== 'opened' && ev.kind !== 'branched')
+            .map(ev => {
+              const head = `  ${timeOf(ev.at)} ${GLYPH[ev.kind] ?? '·'} `
+              return (
+                <Text color="text">
+                  {head}
+                  {cut(ev.text, width - head.length)}
+                  {ev.source === 'auto' ? ' ⟲' : ''}
+                </Text>
+              )
+            })}
+        </Box>
+      ))}
     </Box>
   )
 }
@@ -513,6 +565,12 @@ async function itemsBody($: EngineInterface, e: PaneInput) {
 
   return (
     <Box flexDirection="column">
+      <Box flexDirection="row" flexWrap="wrap" key="refresh-row">
+        <Button key="refresh" onPress={() => refresh($)}>
+          <Text color="text">⟳ Refresh</Text>
+        </Button>
+        <Text dimColor> ctrl+x, then ↑↓ to scroll</Text>
+      </Box>
       {offer && (
         <Box flexDirection="column" marginBottom={1} key="carry">
           <Text bold color="claude">

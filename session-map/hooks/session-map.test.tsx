@@ -57,13 +57,12 @@ test('issues, branches and closes show in the timeline; closed ones dim', async 
   await $.tool.call({ tool: T, action: 'close', issue: 'I1' } as any)
 
   for (const surface of ['terminal', 'desktop'] as const) {
-    const ui = await $.ui.mount({ ...pane('timeline'), surface })
+    const ui = await $.ui.mount({ ...pane('session-map'), surface })
     const branch = await ui.find({ type: 'Text', text: /Branched off I1/ })
     expect(branch).toBeDefined()
     const step = await ui.find({ type: 'Text', text: /Read the auth code/ })
     expect(step?.props?.dimColor).toBe(true)
     expect(await ui.find({ type: 'Text', text: /Completed \(1\)/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /✓ I1 Fix login bug/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /grey.*= completed/ })).toBeDefined()
     const active = await ui.find({ type: 'Text', text: /● I2 Token expiry wrong/ })
     expect(active?.props?.dimColor).not.toBe(true)
@@ -84,7 +83,7 @@ test('Start on a to-do asks Claude to begin it and leaves the item open', async 
   await start($)
   await $.tool.call({ tool: 'mcp__session-map__open_items', action: 'add', kind: 'todo', text: 'Write README' } as any)
 
-  const ui = await $.ui.mount({ ...pane('open-items'), surface: 'terminal' })
+  const ui = await $.ui.mount({ ...pane('session-map'), surface: 'terminal' })
   await ui.press({ key: 'T1-start' })
   expect(submitted.at(-1)).toMatch(/Start T1: "Write README"/)
   expect(submitted.at(-1)).toMatch(/left for me/)
@@ -104,7 +103,7 @@ test('clicking a decision option sends it to Claude and resolves the item', asyn
   } as any)
   await $.tool.call({ tool: 'mcp__session-map__open_items', action: 'add', kind: 'todo', text: 'Write README' } as any)
 
-  const ui = await $.ui.mount({ ...pane('open-items'), surface: 'terminal' })
+  const ui = await $.ui.mount({ ...pane('session-map'), surface: 'terminal' })
   await ui.press({ key: 'D1-o1' })
   expect(submitted.at(-1)).toMatch(/D1 .*One repo or two\?.*Two repos/)
   expect(await ui.find({ type: 'Text', text: /✓ D1 .*→ Two repos/ })).toBeDefined()
@@ -147,7 +146,7 @@ test('the combined pane shows open items above the timeline', async ($, on) => {
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...pane('session-map'), surface })
     expect(await ui.find({ type: 'Text', text: /D1 Public or private\?/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /^OPEN ITEMS & DECISIONS$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^DECISIONS & TO-DOS$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^TIMELINE$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /I1 Repo setup/ })).toBeDefined()
     expect(await ui.find({ key: 'D1-o0' })).toBeDefined()
@@ -167,14 +166,14 @@ test('first run shows the welcome once; Got it switches to the map', async ($, o
   expect(await ui.find({ type: 'Text', text: /afraid of closing a session/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^Just installed\? Start a new session/ })).toBeDefined()
   await ui.press({ key: 'welcome-ok' })
-  expect(opened.slice(-3)).toEqual(['open-items', 'timeline', 'session-map'])
+  expect(opened.slice(-1)).toEqual(['session-map'])
   await ui.unmount()
 
   opened.length = 0
   await start($)
-  // Later sessions: all three tabs, Session map opened last so it is in front.
+  // Later sessions: the one pane, so the engine draws no tab row.
   await clock.settle()
-  expect(opened).toEqual(['open-items', 'timeline', 'session-map'])
+  expect(opened).toEqual(['session-map'])
 })
 
 test('the timeline lists the newest moment first', async ($, on) => {
@@ -183,7 +182,7 @@ test('the timeline lists the newest moment first', async ($, on) => {
   const T = 'mcp__session-map__timeline'
   await $.tool.call({ tool: T, action: 'open', title: 'First thing' } as any)
   await $.tool.call({ tool: T, action: 'step', issue: 'I1', text: 'Second thing' } as any)
-  const ui = await $.ui.mount({ ...pane('timeline'), surface: 'terminal' })
+  const ui = await $.ui.mount({ ...pane('session-map'), surface: 'terminal' })
   const rows = (await ui.findAll({ type: 'Text', text: /^\d\d:\d\d .*I1 (First|Second) thing/ })).map((r: any) => r.text)
   expect(rows[0]).toMatch(/Second thing/)
   expect(rows[1]).toMatch(/First thing/)
@@ -293,4 +292,65 @@ test('work with nothing logged earns a reminder on the next prompt, once', async
   await turn()
   await say()
   expect(contexts.at(-1) ?? []).toEqual([])
+})
+
+test('the Completed section lists finished issues with their moments; the timeline only names them', async ($, on) => {
+  engine(on, [])
+  await start($)
+  const T = 'mcp__session-map__timeline'
+  await $.tool.call({ tool: T, action: 'open', title: 'Fix login bug' } as any)
+  await $.tool.call({ tool: T, action: 'step', issue: 'I1', text: 'Read the auth code' } as any)
+  await $.tool.call({ tool: T, action: 'close', issue: 'I1' } as any)
+  await $.tool.call({ tool: T, action: 'open', title: 'Still going' } as any)
+
+  const done = await $.ui.mount({ ...pane('session-map'), surface: 'terminal' })
+  expect(await done.find({ type: 'Text', text: /✓ I1 Fix login bug/ })).toBeDefined()
+  expect(await done.find({ type: 'Text', text: /Read the auth code/ })).toBeDefined()
+  expect(await done.find({ type: 'Text', text: /^COMPLETED$/ })).toBeDefined()
+  await done.unmount()
+
+  const tl = await $.ui.mount({ ...pane('session-map'), surface: 'terminal' })
+  expect(await tl.find({ type: 'Text', text: /Completed \(1\): I1 — full story under Completed, below/ })).toBeDefined()
+  await tl.unmount()
+})
+
+test('Refresh runs the catch-up check and resolves a decision settled in chat', async ($, on) => {
+  engine(on, [])
+  const forks: string[] = []
+  on('model.fork', (_: any, e: any) => {
+    forks.push(e.prompt)
+    return { value: { isAnswered: true, text: '{"resolve":["D1"]}' } }
+  })
+  on('ui.toast', () => ({ value: undefined }))
+  await start($)
+  await $.tool.call({
+    tool: 'mcp__session-map__open_items', action: 'add', kind: 'decision', text: 'Public or private?', options: ['Private', 'Public'],
+  } as any)
+
+  const ui = await $.ui.mount({ ...pane('session-map'), surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /ctrl\+x, then ↑↓ to scroll/ })).toBeDefined()
+  await ui.press({ key: 'refresh' })
+  await ui.unmount()
+  expect(forks.length).toBe(1)
+  const digest = await $.tool.call({ tool: 'mcp__session-map__session_map' } as any)
+  expect(JSON.stringify(digest)).toMatch(/Open items \(0\)/)
+})
+
+test('the 15-minute check runs only when turns happened since the last one', async ($, on) => {
+  const clock = engine(on, [])
+  let forks = 0
+  on('model.fork', () => {
+    forks += 1
+    return { value: { isAnswered: true, text: '{}' } }
+  })
+  on('ui.toast', () => ({ value: undefined }))
+  on('turn.complete', () => ({ text: 'done' }))
+  await start($)
+  await clock.advance(15 * 60 * 1000)
+  expect(forks).toBe(0)
+  await $.turn.complete({ reason: 'answer', answer: 'done' } as any)
+  await clock.advance(15 * 60 * 1000)
+  expect(forks).toBe(1)
+  await clock.advance(15 * 60 * 1000)
+  expect(forks).toBe(1)
 })

@@ -51,7 +51,7 @@ export type SessionMap = {
 /** Open items an earlier session in this folder left, offered at start. */
 export type CarryOffer = { fromSid: string; items: OpenItem[] }
 
-export type PaneFlags = { timeline: boolean; items: boolean; combined?: boolean }
+export type PaneFlags = { timeline: boolean; items: boolean; combined?: boolean; completed?: boolean }
 
 declare module 'claude-code' {
   interface PluginState {
