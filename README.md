@@ -2,7 +2,7 @@
 
 A Claude Code mod that keeps you oriented in long sessions. One pane beside the chat shows what you're working on, what's been decided, and what's still waiting on you.
 
-![The session-map pane: two decisions with one button per option and an unfinished item with Start, Done and Drop buttons on top; below, the timeline with two active issues, one completed, and a time-stamped log](assets/pane.png)
+![The session-map pane: a Refresh map button on top; Decisions & to-dos with two decisions (one button per option) and an unfinished item with Start, Done and Drop buttons; the timeline with two active issues and a time-stamped log; and a Completed section with one finished issue and its history](assets/pane.png)
 
 > **Early access.** Claude Code's mod API is still in early access and changes between Claude Code releases. A new Claude Code version can stop this mod from loading until it is updated. If the pane doesn't appear, open an issue and include your Claude Code version (`claude --version`).
 
